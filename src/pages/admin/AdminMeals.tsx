@@ -44,6 +44,17 @@ export default function AdminMeals() {
     },
   });
 
+  const { data: totalParticipants = 0 } = useQuery({
+    queryKey: ['total-participants'],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('profiles')
+        .select('id', { count: 'exact', head: true });
+      if (error) throw error;
+      return count || 0;
+    },
+  });
+
   const { data: checkedInCount = 0 } = useQuery({
     queryKey: ['checked-in-count'],
     queryFn: async () => {
@@ -58,11 +69,30 @@ export default function AdminMeals() {
 
   const createSessionMutation = useMutation({
     mutationFn: async (data: { meal_type: string; display_name: string }) => {
-      const { error } = await supabase.from('meal_sessions').insert(data);
+      // Create meal session
+      const { data: session, error } = await supabase
+        .from('meal_sessions')
+        .insert(data)
+        .select()
+        .single();
       if (error) throw error;
+
+      // Get all participants (users with participant role)
+      const { data: participants, error: participantsError } = await supabase
+        .from('profiles')
+        .select('id');
+      
+      if (participantsError) throw participantsError;
+
+      // Note: Meal allocations are tracked via meal_transactions
+      // When a meal is scanned, a transaction is created marking it as claimed
+      // The "served" count shows how many have claimed their meal
+      
+      return session;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['meal-sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['meal-stats'] });
       toast.success('Meal session created');
       setIsCreateOpen(false);
     },
@@ -133,11 +163,21 @@ export default function AdminMeals() {
         <Card className="border-primary/20">
           <CardHeader className="flex flex-row items-center gap-2">
             <Utensils className="h-5 w-5 text-primary" />
-            <CardTitle>Checked-in Participants</CardTitle>
+            <CardTitle>Total Participants</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold text-primary">{totalParticipants}</p>
+            <p className="text-sm text-muted-foreground">Eligible for meals</p>
+          </CardContent>
+        </Card>
+        <Card className="border-primary/20">
+          <CardHeader className="flex flex-row items-center gap-2">
+            <Utensils className="h-5 w-5 text-primary" />
+            <CardTitle>Checked-in Today</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold text-primary">{checkedInCount}</p>
-            <p className="text-sm text-muted-foreground">Available for meal service</p>
+            <p className="text-sm text-muted-foreground">Currently inside venue</p>
           </CardContent>
         </Card>
       </div>
@@ -153,8 +193,8 @@ export default function AdminMeals() {
                 <TableRow>
                   <TableHead>Meal Type</TableHead>
                   <TableHead>Display Name</TableHead>
-                  <TableHead>Served</TableHead>
-                  <TableHead>% of Checked-in</TableHead>
+                  <TableHead>Claimed / Total</TableHead>
+                  <TableHead>% Claimed</TableHead>
                   <TableHead>Active</TableHead>
                 </TableRow>
               </TableHeader>
@@ -177,11 +217,11 @@ export default function AdminMeals() {
                       <TableCell className="font-mono text-sm">{session.meal_type}</TableCell>
                       <TableCell className="font-medium">{session.display_name}</TableCell>
                       <TableCell className="font-bold text-primary">
-                        {mealStats[session.meal_type] || 0}
+                        {mealStats[session.meal_type] || 0} / {totalParticipants}
                       </TableCell>
                       <TableCell>
-                        {checkedInCount > 0
-                          ? `${Math.round(((mealStats[session.meal_type] || 0) / checkedInCount) * 100)}%`
+                        {totalParticipants > 0
+                          ? `${Math.round(((mealStats[session.meal_type] || 0) / totalParticipants) * 100)}%`
                           : '0%'}
                       </TableCell>
                       <TableCell>

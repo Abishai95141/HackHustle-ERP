@@ -1,0 +1,7 @@
+name,email,phone,team_name,team_code,tshirt_size,dietary_restrictions
+John Doe,john.doe@example.com,+1234567890,Alpha Team,ALPHA001,M,Vegetarian
+Jane Smith,jane.smith@example.com,+0987654321,Alpha Team,ALPHA001,S,None
+Bob Wilson,bob.wilson@example.com,+1122334455,Beta Team,BETA002,L,Vegan
+Alice Johnson,alice.johnson@example.com,+5544332211,Beta Team,BETA002,XL,Gluten-free
+Mike Brown,mike.brown@example.com,+9988776655,Gamma Team,GAMMA003,M,
+Sarah Davis,sarah.davis@example.com,+6655443322,Gamma Team,GAMMA003,S,Halal
