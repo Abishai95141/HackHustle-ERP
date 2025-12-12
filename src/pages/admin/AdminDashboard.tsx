@@ -44,9 +44,18 @@ export default function AdminDashboard() {
       })
       .subscribe();
 
+    // Subscribe to profile changes for real-time venue status updates
+    const profilesChannel = supabase
+      .channel('profiles-changes')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, () => {
+        fetchDashboardData();
+      })
+      .subscribe();
+
     return () => {
       supabase.removeChannel(attendanceChannel);
       supabase.removeChannel(mealsChannel);
+      supabase.removeChannel(profilesChannel);
     };
   }, []);
 

@@ -194,6 +194,7 @@ export default function AdminMeals() {
                   <TableHead>Meal Type</TableHead>
                   <TableHead>Display Name</TableHead>
                   <TableHead>Claimed / Total</TableHead>
+                  <TableHead>Remaining</TableHead>
                   <TableHead>% Claimed</TableHead>
                   <TableHead>Active</TableHead>
                 </TableRow>
@@ -201,39 +202,46 @@ export default function AdminMeals() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                       Loading...
                     </TableCell>
                   </TableRow>
                 ) : sessions.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                       No meal sessions configured
                     </TableCell>
                   </TableRow>
                 ) : (
-                  sessions.map((session) => (
-                    <TableRow key={session.id}>
-                      <TableCell className="font-mono text-sm">{session.meal_type}</TableCell>
-                      <TableCell className="font-medium">{session.display_name}</TableCell>
-                      <TableCell className="font-bold text-primary">
-                        {mealStats[session.meal_type] || 0} / {totalParticipants}
-                      </TableCell>
-                      <TableCell>
-                        {totalParticipants > 0
-                          ? `${Math.round(((mealStats[session.meal_type] || 0) / totalParticipants) * 100)}%`
-                          : '0%'}
-                      </TableCell>
-                      <TableCell>
-                        <Switch
-                          checked={session.is_active}
-                          onCheckedChange={(checked) =>
-                            toggleSessionMutation.mutate({ id: session.id, is_active: checked })
-                          }
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  sessions.map((session) => {
+                    const claimed = mealStats[session.meal_type] || 0;
+                    const remaining = totalParticipants - claimed;
+                    return (
+                      <TableRow key={session.id}>
+                        <TableCell className="font-mono text-sm">{session.meal_type}</TableCell>
+                        <TableCell className="font-medium">{session.display_name}</TableCell>
+                        <TableCell className="font-bold text-primary">
+                          {claimed} / {totalParticipants}
+                        </TableCell>
+                        <TableCell className="font-bold text-warning">
+                          {remaining}
+                        </TableCell>
+                        <TableCell>
+                          {totalParticipants > 0
+                            ? `${Math.round((claimed / totalParticipants) * 100)}%`
+                            : '0%'}
+                        </TableCell>
+                        <TableCell>
+                          <Switch
+                            checked={session.is_active}
+                            onCheckedChange={(checked) =>
+                              toggleSessionMutation.mutate({ id: session.id, is_active: checked })
+                            }
+                          />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>

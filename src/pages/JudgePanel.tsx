@@ -7,22 +7,23 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { toast } from 'sonner';
-import { JudgeAssignment, JudgeScore, Team } from '@/lib/types';
+import { JudgeScore, Team } from '@/lib/types';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 export default function JudgePanel() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
-  const { data: assignments = [], isLoading } = useQuery({
-    queryKey: ['judge-assignments', user?.id],
+  // Fetch all teams for judges to score
+  const { data: teams = [], isLoading } = useQuery({
+    queryKey: ['all-teams'],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('judge_assignments')
-        .select('*, team:teams(*)')
-        .eq('judge_id', user?.id);
+        .from('teams')
+        .select('*')
+        .order('team_name');
       if (error) throw error;
-      return data as (JudgeAssignment & { team: Team })[];
+      return data as Team[];
     },
     enabled: !!user?.id,
   });
@@ -90,11 +91,11 @@ export default function JudgePanel() {
     );
   }
 
-  if (assignments.length === 0) {
+  if (teams.length === 0) {
     return (
       <div className="text-center py-12">
         <h1 className="font-display text-2xl font-bold text-primary mb-4">Judge Panel</h1>
-        <p className="text-muted-foreground">No teams assigned to you yet.</p>
+        <p className="text-muted-foreground">No teams available to score yet.</p>
       </div>
     );
   }
@@ -105,11 +106,11 @@ export default function JudgePanel() {
       <p className="text-muted-foreground">Score the teams assigned to you.</p>
 
       <div className="grid gap-6">
-        {assignments.map((assignment) => (
+        {teams.map((team) => (
           <TeamScoreCard
-            key={assignment.id}
-            assignment={assignment}
-            existingScore={existingScores[`${assignment.team_id}-${assignment.round_name}`]}
+            key={team.id}
+            team={team}
+            existingScore={existingScores[`${team.id}-Round 1`]}
             onSubmit={(scores) => submitScoreMutation.mutate(scores)}
             isSubmitting={submitScoreMutation.isPending}
           />
@@ -120,12 +121,12 @@ export default function JudgePanel() {
 }
 
 function TeamScoreCard({
-  assignment,
+  team,
   existingScore,
   onSubmit,
   isSubmitting,
 }: {
-  assignment: JudgeAssignment & { team: Team };
+  team: Team;
   existingScore?: JudgeScore;
   onSubmit: (scores: any) => void;
   isSubmitting: boolean;
@@ -139,8 +140,8 @@ function TeamScoreCard({
 
   const handleSubmit = () => {
     onSubmit({
-      team_id: assignment.team_id,
-      round_name: assignment.round_name,
+      team_id: team.id,
+      round_name: 'Round 1',
       score_innovation: innovation,
       score_feasibility: feasibility,
       score_code_quality: codeQuality,
@@ -153,9 +154,9 @@ function TeamScoreCard({
       <CardHeader>
         <div className="flex justify-between items-start">
           <div>
-            <CardTitle className="text-xl">{assignment.team.team_name}</CardTitle>
+            <CardTitle className="text-xl">{team.team_name}</CardTitle>
             <p className="text-sm text-muted-foreground">
-              {assignment.round_name} • Table: {assignment.team.table_number || 'N/A'}
+              Round 1 • Table: {team.table_number || 'N/A'}
             </p>
           </div>
           <div className="text-right">
