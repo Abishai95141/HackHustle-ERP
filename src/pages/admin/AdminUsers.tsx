@@ -6,9 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { Upload, Search, UserPlus, Edit, Trash2 } from 'lucide-react';
+import { Upload, Search, UserPlus, Edit, Trash2, Loader2 } from 'lucide-react';
 import { Profile, AppRole } from '@/lib/types';
 import { StatusBadge } from '@/components/ui/status-badge';
 import Papa from 'papaparse';
@@ -19,6 +20,7 @@ export default function AdminUsers() {
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [editingUser, setEditingUser] = useState<Profile | null>(null);
   const [newRole, setNewRole] = useState<AppRole>('participant');
+  const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
@@ -65,6 +67,28 @@ export default function AdminUsers() {
     },
   });
 
+  const deleteUserMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const response = await supabase.functions.invoke('delete-user', {
+        body: { userId },
+      });
+
+      if (response.error) throw response.error;
+      if (response.data?.error) throw new Error(response.data.error);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+      queryClient.invalidateQueries({ queryKey: ['user-roles'] });
+      toast.success('User deleted successfully');
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to delete user');
+    },
+  });
+
   const downloadCredentialsCSV = (credentials: { name: string; email: string; password: string; team_name: string }[]) => {
     const csvContent = Papa.unparse(credentials, {
       columns: ['name', 'email', 'password', 'team_name'],
@@ -80,9 +104,11 @@ export default function AdminUsers() {
     URL.revokeObjectURL(url);
   };
 
-  const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCSVUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    setIsImporting(true);
 
     Papa.parse(file, {
       header: true,
@@ -90,6 +116,7 @@ export default function AdminUsers() {
         const participants = results.data as any[];
         let created = 0;
         let errors = 0;
+        let skipped = 0;
         const createdCredentials: { name: string; email: string; password: string; team_name: string }[] = [];
 
         for (const p of participants) {
@@ -116,34 +143,32 @@ export default function AdminUsers() {
               teamId = newTeam.id;
             }
 
-            // Create user via signup (creates auth user + profile via trigger)
+            // Create user via edge function (doesn't affect current session)
             const tempPassword = `Hack${Math.random().toString(36).slice(2, 10)}!`;
-            const { data: authData, error: authError } = await supabase.auth.signUp({
-              email: p.email,
-              password: tempPassword,
-              options: {
-                data: { name: p.name },
-              },
-            });
-
-            if (authError) {
-              if (!authError.message.includes('already registered')) {
-                throw authError;
-              }
-              // Skip already registered users
-              continue;
-            }
-
-            // Update profile with additional data
-            await supabase
-              .from('profiles')
-              .update({
+            
+            const response = await supabase.functions.invoke('create-user', {
+              body: {
+                email: p.email,
+                password: tempPassword,
+                name: p.name,
                 team_id: teamId,
                 phone: p.phone || null,
                 tshirt_size: p.tshirt_size || null,
                 dietary_restrictions: p.dietary_restrictions || null,
-              })
-              .eq('email', p.email);
+              },
+            });
+
+            if (response.error) {
+              throw response.error;
+            }
+
+            if (response.data?.error) {
+              if (response.data.error.includes('already been registered')) {
+                skipped++;
+                continue;
+              }
+              throw new Error(response.data.error);
+            }
 
             // Track credentials for download
             createdCredentials.push({
@@ -154,13 +179,14 @@ export default function AdminUsers() {
             });
 
             created++;
-          } catch (err) {
+          } catch (err: any) {
             console.error('Error creating participant:', err);
             errors++;
           }
         }
 
-        toast.success(`Import complete: ${created} created, ${errors} errors`);
+        setIsImporting(false);
+        toast.success(`Import complete: ${created} created, ${skipped} skipped, ${errors} errors`);
         queryClient.invalidateQueries({ queryKey: ['admin-users'] });
 
         // Download credentials CSV if any users were created
@@ -170,6 +196,7 @@ export default function AdminUsers() {
         }
       },
       error: () => {
+        setIsImporting(false);
         toast.error('Failed to parse CSV file');
       },
     });
@@ -199,9 +226,9 @@ export default function AdminUsers() {
             onChange={handleCSVUpload}
             className="hidden"
           />
-          <Button onClick={() => fileInputRef.current?.click()} className="gap-2">
-            <Upload className="h-4 w-4" />
-            Import CSV
+          <Button onClick={() => fileInputRef.current?.click()} className="gap-2" disabled={isImporting}>
+            {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            {isImporting ? 'Importing...' : 'Import CSV'}
           </Button>
           <a href="/sample-participants.csv" download>
             <Button variant="outline" className="gap-2">
@@ -278,55 +305,81 @@ export default function AdminUsers() {
                         </StatusBadge>
                       </TableCell>
                       <TableCell>
-                        <Dialog open={editingUser?.id === user.id} onOpenChange={(open) => !open && setEditingUser(null)}>
-                          <DialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setEditingUser(user);
-                                setNewRole(userRoles[user.id] || 'participant');
-                              }}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent>
-                            <DialogHeader>
-                              <DialogTitle>Edit User Role</DialogTitle>
-                            </DialogHeader>
-                            <div className="space-y-4">
-                              <div>
-                                <Label>User</Label>
-                                <p className="text-muted-foreground">{editingUser?.name} ({editingUser?.email})</p>
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Role</Label>
-                                <Select value={newRole} onValueChange={(v) => setNewRole(v as AppRole)}>
-                                  <SelectTrigger>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="super_admin">Super Admin</SelectItem>
-                                    <SelectItem value="participant">Participant</SelectItem>
-                                    <SelectItem value="volunteer">Volunteer</SelectItem>
-                                    <SelectItem value="judge">Judge</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
+                        <div className="flex gap-1">
+                          <Dialog open={editingUser?.id === user.id} onOpenChange={(open) => !open && setEditingUser(null)}>
+                            <DialogTrigger asChild>
                               <Button
+                                variant="ghost"
+                                size="icon"
                                 onClick={() => {
-                                  if (editingUser) {
-                                    updateRoleMutation.mutate({ userId: editingUser.id, role: newRole });
-                                  }
+                                  setEditingUser(user);
+                                  setNewRole(userRoles[user.id] || 'participant');
                                 }}
-                                disabled={updateRoleMutation.isPending}
                               >
-                                Update Role
+                                <Edit className="h-4 w-4" />
                               </Button>
-                            </div>
-                          </DialogContent>
-                        </Dialog>
+                            </DialogTrigger>
+                            <DialogContent>
+                              <DialogHeader>
+                                <DialogTitle>Edit User Role</DialogTitle>
+                              </DialogHeader>
+                              <div className="space-y-4">
+                                <div>
+                                  <Label>User</Label>
+                                  <p className="text-muted-foreground">{editingUser?.name} ({editingUser?.email})</p>
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Role</Label>
+                                  <Select value={newRole} onValueChange={(v) => setNewRole(v as AppRole)}>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="super_admin">Super Admin</SelectItem>
+                                      <SelectItem value="participant">Participant</SelectItem>
+                                      <SelectItem value="volunteer">Volunteer</SelectItem>
+                                      <SelectItem value="judge">Judge</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <Button
+                                  onClick={() => {
+                                    if (editingUser) {
+                                      updateRoleMutation.mutate({ userId: editingUser.id, role: newRole });
+                                    }
+                                  }}
+                                  disabled={updateRoleMutation.isPending}
+                                >
+                                  Update Role
+                                </Button>
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete User</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Are you sure you want to delete <strong>{user.name}</strong> ({user.email})? This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => deleteUserMutation.mutate(user.id)}
+                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                >
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
