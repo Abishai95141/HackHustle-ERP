@@ -65,6 +65,21 @@ export default function AdminUsers() {
     },
   });
 
+  const downloadCredentialsCSV = (credentials: { name: string; email: string; password: string; team_name: string }[]) => {
+    const csvContent = Papa.unparse(credentials, {
+      columns: ['name', 'email', 'password', 'team_name'],
+    });
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `login-credentials-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -75,6 +90,7 @@ export default function AdminUsers() {
         const participants = results.data as any[];
         let created = 0;
         let errors = 0;
+        const createdCredentials: { name: string; email: string; password: string; team_name: string }[] = [];
 
         for (const p of participants) {
           if (!p.email || !p.name || !p.team_name || !p.team_code) continue;
@@ -114,6 +130,8 @@ export default function AdminUsers() {
               if (!authError.message.includes('already registered')) {
                 throw authError;
               }
+              // Skip already registered users
+              continue;
             }
 
             // Update profile with additional data
@@ -127,6 +145,14 @@ export default function AdminUsers() {
               })
               .eq('email', p.email);
 
+            // Track credentials for download
+            createdCredentials.push({
+              name: p.name,
+              email: p.email,
+              password: tempPassword,
+              team_name: p.team_name,
+            });
+
             created++;
           } catch (err) {
             console.error('Error creating participant:', err);
@@ -136,6 +162,12 @@ export default function AdminUsers() {
 
         toast.success(`Import complete: ${created} created, ${errors} errors`);
         queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+
+        // Download credentials CSV if any users were created
+        if (createdCredentials.length > 0) {
+          downloadCredentialsCSV(createdCredentials);
+          toast.info('Login credentials CSV downloaded');
+        }
       },
       error: () => {
         toast.error('Failed to parse CSV file');
